@@ -146,7 +146,7 @@ lint:
 # Build binaries
 # NOTE it may be necessary to use CGO_ENABLED=0 for backwards compatibility with centos7 if not using centos7
 binary: check-gopath
-	${GO} build ./cmd/trex
+	${GO} build -mod vendor ./cmd/trex
 .PHONY: binary
 
 # Install
@@ -170,7 +170,7 @@ install: check-gopath
 # Examples:
 #   make test TESTFLAGS="-run TestSomething"
 test: install
-	OCM_ENV=testing gotestsum --format short-verbose -- -p 1 -v $(TESTFLAGS) \
+	OCM_ENV=testing go test --format short-verbose -- -p 1 -v $(TESTFLAGS) \
 		./pkg/... \
 		./cmd/...
 .PHONY: test
@@ -184,7 +184,7 @@ test: install
 #   make test-unit-json TESTFLAGS="-run TestSomething"
 ci-test-unit: install
 	@echo $(db_password) > ${PWD}/secrets/db.password
-	OCM_ENV=testing gotestsum --jsonfile-timing-events=$(unit_test_json_output) --format short-verbose -- -p 1 -v $(TESTFLAGS) \
+	OCM_ENV=testing go test --jsonfile-timing-events=$(unit_test_json_output) --format short-verbose -- -p 1 -v $(TESTFLAGS) \
 		./pkg/... \
 		./cmd/...
 .PHONY: ci-test-unit
@@ -201,7 +201,7 @@ ci-test-unit: install
 #   make test-integration TESTFLAGS="-short"                skips long-run tests
 ci-test-integration: install
 	@echo $(db_password) > ${PWD}/secrets/db.password
-	OCM_ENV=testing gotestsum --jsonfile-timing-events=$(integration_test_json_output) --format $(TEST_SUMMARY_FORMAT) -- -p 1 -ldflags -s -v -timeout 1h $(TESTFLAGS) \
+	OCM_ENV=testing go test --jsonfile-timing-events=$(integration_test_json_output) --format $(TEST_SUMMARY_FORMAT) -- -p 1 -ldflags -s -v -timeout 1h $(TESTFLAGS) \
 			./test/integration
 .PHONY: ci-test-integration
 
@@ -217,7 +217,7 @@ ci-test-integration: install
 #   make test-integration TESTFLAGS="-short"                skips long-run tests
 test-integration: install
 	@echo $(db_password) > ${PWD}/secrets/db.password
-	OCM_ENV=testing gotestsum --format $(TEST_SUMMARY_FORMAT) -- -p 1 -ldflags -s -v -timeout 1h $(TESTFLAGS) \
+	OCM_ENV=testing go test --format $(TEST_SUMMARY_FORMAT) -- -p 1 -ldflags -s -v -timeout 1h $(TESTFLAGS) \
 			./test/integration
 .PHONY: test-integration
 
@@ -244,7 +244,7 @@ run/docs:
 # Delete temporary files
 clean:
 	rm -rf \
-		$(binary) \
+		trex \
 		templates/*-template.json \
 		data/generated/openapi/*.json \
 .PHONY: clean
@@ -301,10 +301,8 @@ image: cmds
 	$(container_tool) build -t "$(external_image_registry)/$(image_repository):$(image_tag)" .
 
 .PHONY: push
-push:	\
-	image \
-	project
-	$(container_tool) push "$(external_image_registry)/$(image_repository):$(image_tag)" --tls-verify=false
+push: image
+	$(container_tool) push "$(external_image_registry)/$(image_repository):$(image_tag)"
 
 deploy-%: project %-template
 	$(oc) apply --filename="templates/$*-template.json" | egrep --color=auto 'configured|$$'
@@ -359,5 +357,5 @@ db/teardown:
 crc/login:
 	@echo "Logging into CRC"
 	@crc console --credentials -ojson | jq -r .clusterConfig.adminCredentials.password | oc login --username kubeadmin --insecure-skip-tls-verify=true https://api.crc.testing:6443
-	@oc whoami --show-token | $(container_tool) login --username kubeadmin --password-stdin "$(external_image_registry)" --tls-verify=false
+	@oc whoami --show-token | $(container_tool) login --username kubeadmin --password-stdin "$(external_image_registry)"
 .PHONY: crc/login

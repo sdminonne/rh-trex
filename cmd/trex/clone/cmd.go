@@ -3,13 +3,16 @@ package clone
 import (
 	"flag"
 	"fmt"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"strings"
+
 	"github.com/golang/glog"
 	"github.com/openshift-online/rh-trex/pkg/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
 type provisionCfgFlags struct {
@@ -23,8 +26,8 @@ func (c *provisionCfgFlags) AddFlags(fs *pflag.FlagSet) {
 }
 
 var provisionCfg = &provisionCfgFlags{
-	Name:        "maestro",
-	Destination: "/tmp/clone-test",
+	Name:        "clone-test",
+	Destination: "/tmp",
 }
 
 // migrate sub-command handles running migrations
@@ -45,80 +48,37 @@ var rw os.FileMode = 0777
 
 func clone(_ *cobra.Command, _ []string) {
 
-	glog.Infof("creating new TRex instance as %s in directory %s", provisionCfg.Name, provisionCfg.Destination)
+	fullName := path.Join(provisionCfg.Destination, provisionCfg.Name)
+	glog.Infof("creating new TRex instance as %s in directory %s", provisionCfg.Name, fullName)
 
 	// walk the filesystem, starting at the root of the project
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(".", func(currentPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// ignore git subdirectories
-		if path == ".git" || strings.Contains(path, ".git/") {
+		if currentPath == ".git" || strings.Contains(currentPath, ".git/") {
 			return nil
 		}
 
-		dest := provisionCfg.Destination + "/" + path
-		if strings.Contains(dest, "trex") {
-			dest = strings.Replace(dest, "trex", strings.ToLower(provisionCfg.Name), -1)
-		}
+		dest := path.Join(fullName, currentPath)
+		dest = strings.Replace(dest, "trex", strings.ToLower(provisionCfg.Name), -1)
 
 		if info.IsDir() {
-			// does this path exist in the destination?
 			if _, err := os.Stat(dest); os.IsNotExist(err) {
 				glog.Infof("Directory does not exist, creating: %s", dest)
 			}
+			return os.MkdirAll(dest, rw)
 
-			err := os.MkdirAll(dest, rw)
-			if err != nil {
-				return err
-			}
-
-		} else {
-			content, err := config.ReadFile(path)
-			if err != nil {
-				return err
-			}
-
-			if strings.Contains(content, "RHTrex") {
-				glog.Infof("find/replace required for file: %s", path)
-				content = strings.Replace(content, "RHTrex", provisionCfg.Name, -1)
-			}
-
-			if strings.Contains(content, "rh-trex") {
-				glog.Infof("find/replace required for file: %s", path)
-				content = strings.Replace(content, "rh-trex", strings.ToLower(provisionCfg.Name), -1)
-			}
-
-			if strings.Contains(content, "rhtrex") {
-				glog.Infof("find/replace required for file: %s", path)
-				content = strings.Replace(content, "rhtrex", strings.ToLower(provisionCfg.Name), -1)
-			}
-
-			if strings.Contains(content, "trex") {
-				glog.Infof("find/replace required for file: %s", path)
-				content = strings.Replace(content, "trex", strings.ToLower(provisionCfg.Name), -1)
-			}
-
-			if strings.Contains(content, "TRex") {
-				glog.Infof("find/replace required for file: %s", path)
-				content = strings.Replace(content, "TRex", provisionCfg.Name, -1)
-			}
-
-			file, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_RDWR, rw)
-			if err != nil {
-				return err
-			}
-
-			written, fErr := file.WriteString(content)
-			if fErr != nil {
-				return fErr
-			}
-
-			glog.Infof("wrote %d bytes for file %s", written, dest)
-			file.Sync()
-			file.Close()
 		}
+		content, err := config.ReadFile(currentPath)
+		if err != nil {
+			return err
+		}
+		rhtrexRegx := regexp.MustCompile(`[Rr]?[Hh]?[-]?[Tt]rex`)
+		content = rhtrexRegx.ReplaceAllString(content, provisionCfg.Name)
+		os.WriteFile(dest, []byte(content), info.Mode().Perm())
 
 		return nil
 	})
